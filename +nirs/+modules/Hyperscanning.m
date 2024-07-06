@@ -129,8 +129,10 @@ classdef Hyperscanning < nirs.modules.AbstractModule
                     for id=1:size(dataA,2)
                         dataA(1:length(time),id)=interp1(timeA,dataA(:,id),time);
                     end
+                     
+                    dataB_orig = dataB;
                      for id=1:size(dataB,2)
-                        dataB(1:length(time),id)=interp1(timeB,dataB(:,id),time);
+                        dataB(1:length(time),id)=interp1(timeB,dataB_orig(:,id),time);
                     end
                     dataA=dataA(1:length(time),:);
                     dataB=dataB(1:length(time),:);
