@@ -299,3 +299,12 @@ probe=nirs.core.Probe(SrcPos,DetPos,link);
 probe.link=probe.link(probe.distances==30,:);
 
 end
+
+
+function result = iseven(x)
+    if(mod(x,2)==0)
+        result=true;
+    else
+        result=false;
+    end
+end
