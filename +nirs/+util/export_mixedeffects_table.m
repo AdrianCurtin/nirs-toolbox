@@ -6,7 +6,13 @@ if(nargin<2)
     centerVars=true;
 end
 
-formula='beta~-1+cond';
+if(isa(S(1),'nirs.core.sFCStats'))
+    formula='Z~-1+cond';
+    isConnStats=true;
+else
+    formula='beta~-1+cond';
+    isConnStats=false;
+end
 
 % demographics info
 demo = nirs.createDemographicsTable( S );
@@ -33,55 +39,90 @@ LstV=[];
 vars = table();
 for i = 1:length(S)
 
-    lstValid=~isnan(S(i).tstat);
+    if(~isConnStats)
+        lstValid=~isnan(S(i).tstat);
+    else
+        lstValid=~isnan(S(i).Z(:));
+    end
     LstV=[LstV; lstValid];
     % coefs
-    if ~isempty(strfind(formula(1:strfind(formula,'~')-1),'tstat'))
-                    b = [b; S(i).tstat];
-                else
-                    b = [b; S(i).beta];
-                end
-    
-    % whitening transform
-    L = chol(S(i).covb,'upper');
-    W = blkdiag(W,pinv(L));
 
+    if(isConnStats)
+        b = [b; S(i).Z];
+    else
+        if ~isempty(strfind(formula(1:strfind(formula,'~')-1),'tstat'))
+            b = [b; S(i).tstat];
+        else
+            b = [b; S(i).beta];
+        end
+    end
+    % whitening transform
+    if(~isConnStats)
+       L = chol(S(i).covb,'upper');
+       W = blkdiag(W,pinv(L));
+    end
+    
+    if(isConnStats)
+        Svars=S(i).table;
+    else
+        Svars=S(i).variables;
+    end
     % table of variables
-    file_idx = repmat(i, [height(S(i).variables) 1]);
+    file_idx = repmat(i, [height(Svars) 1]);
 
     if(~isempty(demo))
         vars = [vars;
-            [table(file_idx) S(i).variables repmat(demo(i,:), [height(S(i).variables) 1])]
+            [table(file_idx) Svars repmat(demo(i,:), [height(Svars) 1])]
             ];
     else
         vars = [vars; ...
-            [table(file_idx) S(i).variables]];
+            [table(file_idx) Svars]];
     end
 end
 
 % sort
-if(~ismember('source',vars.Properties.VariableNames) & ...
-        ismember('ROI',vars.Properties.VariableNames))
-    [vars, idx] = nirs.util.sortrows(vars, {'ROI', 'type'});
+if(isConnStats)
+    vars.R=[];
+%    vars.Z=[];
+    vars.t=[];
+    vars.pvalue=[];
+    vars.qvalue=[];
+    [vars, idx] = nirs.util.sortrows(vars, {'SourceOrigin', 'DetectorOrigin','SourceDest', 'DetectorDest','TypeOrigin', 'TypeDest'});
 
-    % list for first source
-    [sd, ~,lst] = nirs.util.uniquerows(table(vars.ROI, vars.type));
-    sd.Properties.VariableNames = {'ROI', 'type'};
-
-elseif(ismember('NameKernel',vars.Properties.VariableNames))
-    [vars, idx] = nirs.util.sortrows(vars, {'NameKernel', 'type'});
-
-    % list for first source
-    [sd, ~,lst] = nirs.util.uniquerows(table(vars.NameKernel, vars.type));
-    sd.Properties.VariableNames = {'NameKernel', 'type'};
-
+        % list for first source
+        [sd, ~,lst] = nirs.util.uniquerows(table(vars.SourceOrigin, vars.DetectorOrigin, vars.TypeOrigin,...
+            vars.SourceDest, vars.DetectorDest, vars.TypeDest));
+        sd.Properties.VariableNames = {'SourceOrigin', 'DetectorOrigin', 'TypeOrigin','SourceDest', 'DetectorDest', 'TypeDest'};
 else
 
-    [vars, idx] = nirs.util.sortrows(vars, {'source', 'detector', 'type'});
+    if(~ismember('source',vars.Properties.VariableNames) & ...
+            ismember('ROI',vars.Properties.VariableNames))
+        [vars, idx] = nirs.util.sortrows(vars, {'ROI', 'type'});
 
-    % list for first source
-    [sd, ~,lst] = nirs.util.uniquerows(table(vars.source, vars.detector, vars.type));
-    sd.Properties.VariableNames = {'source', 'detector', 'type'};
+        % list for first source
+        [sd, ~,lst] = nirs.util.uniquerows(table(vars.ROI, vars.type));
+        sd.Properties.VariableNames = {'ROI', 'type'};
+
+    elseif(ismember('NameKernel',vars.Properties.VariableNames))
+        [vars, idx] = nirs.util.sortrows(vars, {'NameKernel', 'type'});
+
+        % list for first source
+        [sd, ~,lst] = nirs.util.uniquerows(table(vars.NameKernel, vars.type));
+        sd.Properties.VariableNames = {'NameKernel', 'type'};
+
+    else
+
+        [vars, idx] = nirs.util.sortrows(vars, {'source', 'detector', 'type'});
+
+        % list for first source
+        [sd, ~,lst] = nirs.util.uniquerows(table(vars.source, vars.detector, vars.type));
+        sd.Properties.VariableNames = {'source', 'detector', 'type'};
+    end
+end
+
+if(isConnStats)
+    vars.cond=vars.condition;
+    vars.condition=[];
 end
 
 
@@ -117,13 +158,17 @@ if(~isempty(strfind(formula,'{')))
     formula=strrep(formula,'}',' ');
 end
 
-
-formula=nirs.util.verify_formula([table(beta) tmp], formula,true);
+if(~isConnStats)
+    formula=nirs.util.verify_formula([table(beta) tmp], formula,true);
+end
 respvar = formula(1:strfind(formula,'~')-1);
 
-
-ww=full(diag(W));
-data_tbl = [table(b(idx),ww(idx),'VariableNames',{respvar,'weights'}) vars];
+if(isConnStats)
+    data_tbl = vars; %[table(b(idx),'VariableNames',{respvar}) vars];
+else
+    ww=full(diag(W));
+    data_tbl = [table(b(idx),ww(idx),'VariableNames',{respvar,'weights'}) vars];
+end    
 varNames = data_tbl.Properties.VariableNames;
 
 for i = 1:numel(varNames)
@@ -138,10 +183,21 @@ for i = 1:numel(varNames)
     end
 end
 
-data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.source),'_Det',num2str(data_tbl.detector),'_',cellstr(data_tbl.type)));
+if(isConnStats)
+    data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.SourceOrigin),'_Det',num2str(data_tbl.DetectorOrigin),'_',cellstr(data_tbl.TypeOrigin),...
+        '->Src',num2str(data_tbl.SourceDest),'_Det',num2str(data_tbl.DetectorDest),'_',cellstr(data_tbl.TypeDest)));
+    data_tbl.Z(abs(data_tbl.Z)>5.9)=sign(data_tbl.Z(abs(data_tbl.Z)>5.9))*inf;
+
+    data_tbl.intratype=data_tbl.TypeDest==data_tbl.TypeOrigin;
+
+else
+    data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.source),'_Det',num2str(data_tbl.detector),'_',cellstr(data_tbl.type)));
+end
 
 varargout{1}=data_tbl;
 
-if(nargout==2)
-    varargout{2}=W;
+if(~isConnStats)
+    if(nargout==2)
+        varargout{2}=W;
+    end
 end
