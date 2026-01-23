@@ -175,9 +175,14 @@ for cIdx=1:length(uconds)
             mask = pval < str2double(s{2});
         end
     end
-    I=eye(sqrt(length(mask)));
-    mask=mask.*(~I(:));
     
+    n=height(obj.probe.link);
+    if(length(mask)==n*n)
+        I=eye(sqrt(length(mask)));
+        mask=mask.*(~I(:));
+    end
+    
+   
     % range to show
     if isempty(vrange_arg)
         vmax    = max(abs(values(:).*mask(:)));
@@ -312,7 +317,7 @@ for cIdx=1:length(uconds)
                         colormap(cmap);
                         colorbar(sp);
                         caxis(vrange);
-                       % title(sp,[utypesOrigin{ii} ' --> ' utypesDest{jj}], 'Interpreter','none')
+                        title(sp,[utypesOrigin{ii} ' --> ' utypesDest{jj}], 'Interpreter','none')
                         
                     else
                         
@@ -345,6 +350,6 @@ for cIdx=1:length(uconds)
         end
     
     set(f(cIdx),'Name',obj.conditions{cIdx},'NumberTitle','off')
-    %supertitle(f(cIdx),obj.conditions{cIdx});
+    supertitle(f(cIdx),obj.conditions{cIdx});
 end
 

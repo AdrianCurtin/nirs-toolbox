@@ -87,13 +87,24 @@ if(isConnStats)
     vars.t=[];
     vars.pvalue=[];
     vars.qvalue=[];
-    [vars, idx] = nirs.util.sortrows(vars, {'SourceOrigin', 'DetectorOrigin','SourceDest', 'DetectorDest','TypeOrigin', 'TypeDest'});
+
+    if(ismember('ROIOrigin',vars.Properties.VariableNames))
+        [vars, idx] = nirs.util.sortrows(vars, {'ROIOrigin', 'ROIDest', 'TypeOrigin', 'TypeDest'});
+
+        % list for first source
+        [sd, ~,lst] = nirs.util.uniquerows(table(vars.ROIOrigin, vars.TypeOrigin,...
+            vars.ROIDest,  vars.TypeDest));
+        sd.Properties.VariableNames = {'ROIOrigin', 'TypeOrigin','ROIDest', 'TypeDest'};
+
+    else
+        [vars, idx] = nirs.util.sortrows(vars, {'SourceOrigin', 'DetectorOrigin','SourceDest', 'DetectorDest','TypeOrigin', 'TypeDest'});
 
         % list for first source
         [sd, ~,lst] = nirs.util.uniquerows(table(vars.SourceOrigin, vars.DetectorOrigin, vars.TypeOrigin,...
             vars.SourceDest, vars.DetectorDest, vars.TypeDest));
         sd.Properties.VariableNames = {'SourceOrigin', 'DetectorOrigin', 'TypeOrigin','SourceDest', 'DetectorDest', 'TypeDest'};
-else
+    end
+    else
 
     if(~ismember('source',vars.Properties.VariableNames) & ...
             ismember('ROI',vars.Properties.VariableNames))
@@ -184,14 +195,31 @@ for i = 1:numel(varNames)
 end
 
 if(isConnStats)
-    data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.SourceOrigin),'_Det',num2str(data_tbl.DetectorOrigin),'_',cellstr(data_tbl.TypeOrigin),...
-        '->Src',num2str(data_tbl.SourceDest),'_Det',num2str(data_tbl.DetectorDest),'_',cellstr(data_tbl.TypeDest)));
-    data_tbl.Z(abs(data_tbl.Z)>5.9)=sign(data_tbl.Z(abs(data_tbl.Z)>5.9))*inf;
+    if(ismember('ROIOrigin',data_tbl.Properties.VariableNames))
+       data_tbl.measurement=categorical(strcat('ROI_',cellstr(data_tbl.ROIOrigin),'_',cellstr(data_tbl.TypeOrigin),...
+            '->ROI_',cellstr(data_tbl.ROIDest),'_',cellstr(data_tbl.TypeDest)));
+        data_tbl.Z(abs(data_tbl.Z)>5.9)=sign(data_tbl.Z(abs(data_tbl.Z)>5.9))*inf;
 
-    data_tbl.intratype=data_tbl.TypeDest==data_tbl.TypeOrigin;
+        data_tbl.intratype=data_tbl.TypeDest==data_tbl.TypeOrigin;
+    else
+        data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.SourceOrigin),'_Det',num2str(data_tbl.DetectorOrigin),'_',cellstr(data_tbl.TypeOrigin),...
+            '->Src',num2str(data_tbl.SourceDest),'_Det',num2str(data_tbl.DetectorDest),'_',cellstr(data_tbl.TypeDest)));
+        data_tbl.Z(abs(data_tbl.Z)>5.9)=sign(data_tbl.Z(abs(data_tbl.Z)>5.9))*inf;
 
+        data_tbl.intratype=data_tbl.TypeDest==data_tbl.TypeOrigin;
+    end
 else
-    data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.source),'_Det',num2str(data_tbl.detector),'_',cellstr(data_tbl.type)));
+    if(~ismember('source',vars.Properties.VariableNames) & ...
+            ismember('ROI',vars.Properties.VariableNames))
+        if(~iscellstr(data_tbl.ROI))
+            data_tbl.measurement=categorical(strcat('ROI_',cellstr(data_tbl.ROI),'_',cellstr(data_tbl.type)));
+
+        else
+            data_tbl.measurement=categorical(strcat('ROI_',data_tbl.ROI,'_',cellstr(data_tbl.type)));
+        end
+    else
+        data_tbl.measurement=categorical(strcat('Src',num2str(data_tbl.source),'_Det',num2str(data_tbl.detector),'_',cellstr(data_tbl.type)));
+    end
 end
 
 varargout{1}=data_tbl;
