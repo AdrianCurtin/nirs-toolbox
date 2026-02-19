@@ -28,6 +28,7 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
         useGPU=false;
         precisionSingle=false;
         Pmax='4*Fs';
+        useFast=true; % Use parallelized ar_irls_fast (parfor + fast Satterthwaite DOF)
     end
     methods
         function obj = AR_IRLS( prevJob )
@@ -44,21 +45,38 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
         function S = runThis( obj, data )
             vec = @(x) x(:);
             
+            % Pre-allocate output for parfor compatibility
+            if(~isempty(strfind(class(data(1).probe),'nirs')))
+                S_template = nirs.core.ChannelStats();
+            elseif(~isempty(strfind(class(data(1).probe),'eeg')))
+                S_template = eeg.core.ChannelStats();
+            else
+                S_template = nirs.core.ChannelStats();
+            end
+            S = repmat(S_template, 1, numel(data));
+
+            % Pre-compute Pmax per file (eval not allowed in parfor)
+            Pmax_per_file = zeros(1, numel(data));
             for i = 1:numel(data)
+                Pmax_i = obj.Pmax;
+                if(ischar(Pmax_i) || isstring(Pmax_i))
+                    Fs = data(i).Fs;
+                    eval(['Pmax_i=' char(Pmax_i) ';']);
+                end
+                Pmax_per_file(i) = ceil(Pmax_i);
+            end
+
+            parfor i = 1:numel(data)
                 % get data
                 d  = data(i).data;
                 d=d-ones(size(d,1),1)*nanmean(d,1);
                 d=d-ones(size(d,1),1)*nanmean(d,1);
                 t  = data(i).time;
                 Fs = data(i).Fs;
-                
+
                 probe = data(i).probe;
-                
-                Pmax = obj.Pmax;
-                if(isstr(Pmax))
-                    eval(['Pmax=' Pmax ';']);
-                end
-                Pmax=ceil(Pmax);    
+
+                Pmax = Pmax_per_file(i);    
                 
                 % make sure data is in order
                 
@@ -111,10 +129,20 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                     lst=find(diag(s)>eps(1)*100);
                     V=V(:,lst);
                     if(obj.useREML)
-                        stats = nirs.math.ar_irls_REML( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle);
+                        if(obj.useFast)
+                            stats = nirs.math.ar_irls_REML_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle);
+                        else
+                            stats = nirs.math.ar_irls_REML( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle);
+                        end
                     else
                         if(obj.nonstationary_noise)
-                            stats = nirs.math.ar_irnnls( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle );
+                            if(obj.useFast)
+                                stats = nirs.math.ar_irnsls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle );
+                            else
+                                stats = nirs.math.ar_irnnls( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle );
+                            end
+                        elseif(obj.useFast)
+                            stats = nirs.math.ar_irls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                         else
                             stats = nirs.math.ar_irls( d, U(:,lst)*s(lst,lst), Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                         end
@@ -131,13 +159,23 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                     
                     % run regression
                     if(obj.useREML)
-                        stats = nirs.math.ar_irls_REML( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle );
+                        if(obj.useFast)
+                            stats = nirs.math.ar_irls_REML_fast( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle );
+                        else
+                            stats = nirs.math.ar_irls_REML( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle );
+                        end
                     else
                         if(obj.nonstationary_noise)
-                             stats = nirs.math.ar_irnsls( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
+                            if(obj.useFast)
+                                stats = nirs.math.ar_irnsls_fast( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
+                            else
+                                stats = nirs.math.ar_irnsls( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
+                            end
                         else
                             if(obj.useFstats)
                                 stats = nirs.math.ar_irls_ftest( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
+                            elseif(obj.useFast)
+                                stats = nirs.math.ar_irls_fast( d, [X C], Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                             else
                                 stats = nirs.math.ar_irls( d, [X C], Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                             end
@@ -167,14 +205,6 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                 condition = repmat(names(:)', [nchan 1]);
                 condition = condition(:);
                 
-                if(~isempty(strfind(class(probe),'nirs')))
-                    S(i) = nirs.core.ChannelStats();
-                elseif(~isempty(strfind(class(probe),'eeg')))
-                    S(i) = eeg.core.ChannelStats();
-                else
-                    warning('unsupported data type');
-                    S(i) = nirs.core.ChannelStats();
-                end
                 S(i).variables = [link table(condition,'VariableNames',{'cond'})];
                 S(i).beta = vec( stats.beta(1:ncond,:)' );
                 
@@ -210,7 +240,11 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                 
                 S(i).covb = covb;
                 
-                S(i).dfe  = stats.dfe(1);
+                if numel(stats.dfe) > 1
+                    S(i).dfe = nanmean(stats.dfe);  % fast version returns per-channel DOF
+                else
+                    S(i).dfe = stats.dfe(1);
+                end
                 
                 S(i).description = data(i).description;
                 
@@ -234,7 +268,7 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                 
                 % print progress
                 if(obj.verbose)
-                    obj.printProgress( i, length(data) )
+                    fprintf('Completed file %d of %d\n', i, numel(data));
                 end
             end
             

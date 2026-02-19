@@ -180,7 +180,9 @@ classdef Hyperscanning_GLM < nirs.modules.AbstractGLM
                 j.listOfStims=Stim;
             end
 
-            for i=1:height(obj.link)
+            data2 = repmat(nirs.core.Data(), 1, height(obj.link));
+
+            parfor i=1:height(obj.link)
 
                 idxA = obj.link.ScanA(i);
                 idxB = obj.link.ScanB(i);
