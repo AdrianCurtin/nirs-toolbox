@@ -1,4 +1,4 @@
-function stats = ar_irls_Mixed( d,X,Z,Pmax,tune)
+function stats = ar_irls_Mixed( d,X,Z,Pmax,tune,maxBICSearch)
 % See the following for the related publication:
 % http://www.ncbi.nlm.nih.gov/pmc/articles/PMC3756568/
 %
@@ -52,6 +52,8 @@ warning('off','stats:statrobustfit:IterationLimit')
 if nargin < 5
     tune = 4.685;
 end
+if nargin < 6 || isempty(maxBICSearch), maxBICSearch = 0;
+end
 
 % preallocate stats
 nCond = size(X,2);
@@ -96,6 +98,7 @@ parfor i = 1:nChan
     f = [];
     w = [];
     yf = [];
+    found_order = 0;
 
     % while our coefficients are changing greater than some threshold
     % and it's less than the max number of iterations
@@ -107,7 +110,16 @@ parfor i = 1:nChan
         res = LME.residuals;
 
         % fit the residual to an ar model
-        a = nirs.math.ar_fit(res, Pmax);
+        if maxBICSearch > 0
+            if iter == 0
+                a = nirs.math.ar_fit(res, min(Pmax, maxBICSearch), false);
+                found_order = length(a) - 1;
+            else
+                a = nirs.math.ar_fit(res, found_order, true);
+            end
+        else
+            a = nirs.math.ar_fit(res, Pmax);
+        end
 
         % create a whitening filter from the coefficients
         f = [1; -a(2:end)];

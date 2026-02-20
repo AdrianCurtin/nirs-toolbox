@@ -1,4 +1,6 @@
-function stats = mv_ar_irls( X, Y, Pmax)
+function stats = mv_ar_irls( X, Y, Pmax, maxBICSearch)
+
+if nargin < 4 || isempty(maxBICSearch), maxBICSearch = 0; end
 
 if ndims(X) == 3
     [m, n, p] = size(X);
@@ -31,6 +33,8 @@ end
 b0 = b * 1e16; iter = 0;
 mdl=nirs.math.varm(p,2);
 EstMdl=[];
+nCh = size(Y,2);
+found_orders = zeros(nCh, 1);
 
 disp([' Starting model estimate']);
 %figure; hold on;
@@ -39,14 +43,23 @@ while norm(b-b0)/norm(b0) > .1 && iter < 10
     tic;
 
     b0 = b;
-    
+
 
     Xff=X; r=zeros(size(Y)); Yff=Y;
     bb=reshape(b,[size(X,2),size(Y,2)]);
-    nCh = size(Y,2);
+    prev_orders = found_orders;
     parfor i=1:nCh
             r(:,i)=Y(:,i)-squeeze(X(:,:,i))*bb(:,i);
-            a = nirs.math.ar_fit(r(:,i), Pmax);
+            if maxBICSearch > 0
+                if prev_orders(i) == 0
+                    a = nirs.math.ar_fit(r(:,i), min(Pmax, maxBICSearch), false);
+                    found_orders(i) = length(a) - 1;
+                else
+                    a = nirs.math.ar_fit(r(:,i), prev_orders(i), true);
+                end
+            else
+                a = nirs.math.ar_fit(r(:,i), Pmax);
+            end
             f = [1; -a(2:end)];
             Xff(:,:,i) = myFilter(f,X(:,:,i));
             Yff(:,i) = myFilter(f,Y(:,i));

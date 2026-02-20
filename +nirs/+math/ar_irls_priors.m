@@ -1,4 +1,4 @@
-function stats = ar_irls_priors( d,X,isRE,Pmax,tune,type )
+function stats = ar_irls_priors( d,X,isRE,Pmax,tune,type,maxBICSearch )
 % isFE=[1 0]; -  boolean array of if Fixed Effects (or random effects) in
 % the model- defines which regressors have spatial covariance priors
 % applied to them
@@ -8,6 +8,7 @@ warning('off','stats:statrobustfit:IterationLimit')
 if nargin < 5
     tune = 4.685;
 end
+if nargin < 7 || isempty(maxBICSearch), maxBICSearch = 0; end
 
 Priors=zeros(size(X,2),1);
 Lambda=zeros(size(X,2));
@@ -80,9 +81,19 @@ for it=1:ntypes
             a_loc = [];
             f_loc = [];
 
+            found_order = 0;
             for iter2=1:5
                 res = y - X*B;
-                a_loc = nirs.math.ar_fit(res, Pmax);
+                if maxBICSearch > 0
+                    if iter2 == 1
+                        a_loc = nirs.math.ar_fit(res, min(Pmax, maxBICSearch), false);
+                        found_order = length(a_loc) - 1;
+                    else
+                        a_loc = nirs.math.ar_fit(res, found_order, true);
+                    end
+                else
+                    a_loc = nirs.math.ar_fit(res, Pmax);
+                end
                 f_loc = [1; -a_loc(2:end)];
 
                 % filter the design matrix

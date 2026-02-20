@@ -1,8 +1,8 @@
-function stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision)
+function stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision, maxBICSearch)
 % AR_IRLS_REML_FAST  Parallelized AR-IRLS with REML robust fitting and fast
 %   Satterthwaite degrees-of-freedom estimation.
 %
-%   stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision)
+%   stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision, maxBICSearch)
 %
 %   This is a drop-in replacement for ar_irls_REML that uses parfor for
 %   channel-level parallelism and nirs.math.satterthwaite_dfe for O(n*k)
@@ -15,6 +15,7 @@ function stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision)
 %       tune            - tuning constant for bisquare robust weighting (default 4.685)
 %       useGPU          - unused, kept for signature compatibility (default false)
 %       singlePrecision - unused, kept for signature compatibility (default false)
+%       maxBICSearch    - max AR orders for BIC search (0=full, default 0)
 %
 %   Output:
 %       stats - struct with fields: beta, tstat, pval, ppos, pneg, P, w,
@@ -24,6 +25,7 @@ function stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision)
     if nargin < 4 || isempty(tune), tune = 4.685; end
     if nargin < 5, useGPU = false; end   %#ok<NASGU> kept for API compat
     if nargin < 6, singlePrecision = false; end   %#ok<NASGU>
+    if nargin < 7 || isempty(maxBICSearch), maxBICSearch = 0; end
 
     nCond = size(X, 2);
     nChan = size(d, 2);
@@ -95,13 +97,23 @@ function stats = ar_irls_REML_fast(d, X, Pmax, tune, useGPU, singlePrecision)
         yf = y;
         S  = struct('w', ones(sum(lstValid), 1), 'covb', eye(nCond), ...
                     'sigma', 1, 'resid', zeros(sum(lstValid), 1));
+        found_order = 0;
 
         while norm(B - B0) / norm(B0) > 1e-2 && iter < maxiter
             B0  = B;
             res = y - X * B;
 
-            % AR fit — two arguments only (no nosearch)
-            a = nirs.math.ar_fit(res, p_i);
+            % AR fit with optional BIC cap + skip-after-first
+            if maxBICSearch > 0
+                if iter == 0
+                    a = nirs.math.ar_fit(res, min(p_i, maxBICSearch), false);
+                    found_order = length(a) - 1;
+                else
+                    a = nirs.math.ar_fit(res, found_order, true);
+                end
+            else
+                a = nirs.math.ar_fit(res, p_i);
+            end
             f = [1; -a(2:end)];
 
             Xf = myFilterLocal(f, X);

@@ -1,13 +1,14 @@
-function stats = ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision)
+function stats = ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision, maxBICSearch)
 % AR_IRNSLS_FAST - Parallelized AR(P)-IRNSLS regression
 %
 % Drop-in replacement for nirs.math.ar_irnsls with these optimizations:
 %   1. parfor across channels (falls back to for-loop if no pool)
 %   2. Satterthwaite DOF without forming n*n H matrix (O(n*k^2) vs O(n^2))
 %   3. Diagonal-only cross-channel covariance (matching original)
+%   4. Capped BIC search + skip BIC after first IRLS iteration
 %
-% Usage is identical to nirs.math.ar_irnsls:
-%   stats = nirs.math.ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision)
+% Usage:
+%   stats = nirs.math.ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision, maxBICSearch)
 %
 % See also: nirs.math.ar_irnsls, nirs.math.satterthwaite_dfe
 
@@ -16,6 +17,7 @@ function stats = ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision)
     if nargin < 4 || isempty(tune), tune = 4.685; end
     if nargin < 5, useGPU = false; end
     if nargin < 6, singlePrecision = false; end
+    if nargin < 7 || isempty(maxBICSearch), maxBICSearch = 0; end
 
     nCond = size(X, 2);
     nChan = size(d, 2);
@@ -87,14 +89,25 @@ function stats = ar_irnsls_fast(d, X, Pmax, tune, useGPU, singlePrecision)
                    'resid', zeros(nValid, 1), ...
                    'dfe', nValid - nCond);
 
+        found_order = 0;
+
         while norm(B - B0) / norm(B0) > 1e-2 && iter < maxiter
             B0 = B;
 
             % Residual
             res = y - X * B;
 
-            % AR model fitting (2 args only, no nosearch)
-            a = nirs.math.ar_fit(res, p_i);
+            % AR model fitting with optional BIC cap + skip-after-first
+            if maxBICSearch > 0
+                if iter == 0
+                    a = nirs.math.ar_fit(res, min(p_i, maxBICSearch), false);
+                    found_order = length(a) - 1;
+                else
+                    a = nirs.math.ar_fit(res, found_order, true);
+                end
+            else
+                a = nirs.math.ar_fit(res, p_i);
+            end
 
             % Whitening filter from AR coefficients
             f = [1; -a(2:end)];

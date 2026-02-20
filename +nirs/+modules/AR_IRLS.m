@@ -29,6 +29,7 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
         precisionSingle=false;
         Pmax='4*Fs';
         useFast=true; % Use parallelized ar_irls_fast (parfor + fast Satterthwaite DOF)
+        maxBICSearch=10; % Max AR orders for BIC search (0=full, 10=default). Only used with useFast.
     end
     methods
         function obj = AR_IRLS( prevJob )
@@ -65,6 +66,7 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                 end
                 Pmax_per_file(i) = ceil(Pmax_i);
             end
+            maxBICSearch = obj.maxBICSearch;
 
             parfor i = 1:numel(data)
                 % get data
@@ -130,19 +132,19 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                     V=V(:,lst);
                     if(obj.useREML)
                         if(obj.useFast)
-                            stats = nirs.math.ar_irls_REML_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle);
+                            stats = nirs.math.ar_irls_REML_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle, maxBICSearch);
                         else
                             stats = nirs.math.ar_irls_REML( d, U(:,lst)*s(lst,lst), Pmax ,[],obj.useGPU,obj.precisionSingle);
                         end
                     else
                         if(obj.nonstationary_noise)
                             if(obj.useFast)
-                                stats = nirs.math.ar_irnsls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle );
+                                stats = nirs.math.ar_irnsls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle, maxBICSearch );
                             else
                                 stats = nirs.math.ar_irnnls( d, U(:,lst)*s(lst,lst), Pmax ,[], obj.useGPU, obj.precisionSingle );
                             end
                         elseif(obj.useFast)
-                            stats = nirs.math.ar_irls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],false,obj.useGPU, obj.precisionSingle);
+                            stats = nirs.math.ar_irls_fast( d, U(:,lst)*s(lst,lst), Pmax ,[],false,obj.useGPU, obj.precisionSingle, maxBICSearch);
                         else
                             stats = nirs.math.ar_irls( d, U(:,lst)*s(lst,lst), Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                         end
@@ -160,14 +162,14 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                     % run regression
                     if(obj.useREML)
                         if(obj.useFast)
-                            stats = nirs.math.ar_irls_REML_fast( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle );
+                            stats = nirs.math.ar_irls_REML_fast( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle, maxBICSearch );
                         else
                             stats = nirs.math.ar_irls_REML( d, [X C], Pmax,[],obj.useGPU, obj.precisionSingle );
                         end
                     else
                         if(obj.nonstationary_noise)
                             if(obj.useFast)
-                                stats = nirs.math.ar_irnsls_fast( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
+                                stats = nirs.math.ar_irnsls_fast( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle, maxBICSearch);
                             else
                                 stats = nirs.math.ar_irnsls( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
                             end
@@ -175,7 +177,7 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                             if(obj.useFstats)
                                 stats = nirs.math.ar_irls_ftest( d, [X C], Pmax ,[],obj.useGPU, obj.precisionSingle);
                             elseif(obj.useFast)
-                                stats = nirs.math.ar_irls_fast( d, [X C], Pmax ,[],false,obj.useGPU, obj.precisionSingle);
+                                stats = nirs.math.ar_irls_fast( d, [X C], Pmax ,[],false,obj.useGPU, obj.precisionSingle, maxBICSearch);
                             else
                                 stats = nirs.math.ar_irls( d, [X C], Pmax ,[],false,obj.useGPU, obj.precisionSingle);
                             end

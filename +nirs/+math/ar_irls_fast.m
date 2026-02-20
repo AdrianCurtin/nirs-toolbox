@@ -1,14 +1,20 @@
-function [stats, resid] = ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singlePrecision)
+function [stats, resid] = ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singlePrecision, maxBICSearch)
 % AR_IRLS_FAST - Parallelized AR(P)-IRLS regression
 %
 % Drop-in replacement for nirs.math.ar_irls with these optimizations:
 %   1. parfor across channels (falls back to for-loop if no pool)
 %   2. Satterthwaite DOF without forming n×n H matrix (O(n*k^2) vs O(n^2))
 %   3. Vectorized cross-channel covariance
-%   4. Skip stepwise AR order search after first iteration per channel
+%   4. Capped BIC search + skip BIC after first IRLS iteration per channel
 %
-% Usage is identical to nirs.math.ar_irls:
-%   [stats, resid] = nirs.math.ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singlePrecision)
+% Usage:
+%   [stats, resid] = nirs.math.ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singlePrecision, maxBICSearch)
+%
+%   maxBICSearch - (optional) Maximum AR orders to evaluate in BIC search.
+%       0 = full search up to Pmax every iteration (default, same as ar_irls)
+%       N>0 = search orders 1..N on first IRLS iteration, then direct fit
+%             at found order on subsequent iterations (much faster)
+%       Typical value: 3 (sufficient for most fNIRS data)
 %
 % See also: nirs.math.ar_irls
 
@@ -18,6 +24,7 @@ function [stats, resid] = ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singl
     if nargin < 5, nosearch = false; end
     if nargin < 6, useGPU = false; end
     if nargin < 7, singlePrecision = false; end
+    if nargin < 8 || isempty(maxBICSearch), maxBICSearch = 0; end
 
     nCond = size(X, 2);
     nChan = size(d, 2);
@@ -98,13 +105,25 @@ function [stats, resid] = ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singl
         Xf = X;
         yf = y;
         S = struct('w', ones(nValid,1), 'robust_s', 1, 'covb', eye(nCond), 'resid', zeros(nValid,1));
+        found_order = 0;  % AR order found by BIC on first iteration
 
         while norm(B - B0) / norm(B0) > 1e-2 && iter < maxiter
             B0 = B;
             res = y - X * B;
 
             % AR model fitting
-            a = nirs.math.ar_fit(res, p_i, nosearch);
+            if maxBICSearch > 0 && ~nosearch
+                if iter == 0
+                    % First iteration: BIC search capped at maxBICSearch
+                    a = nirs.math.ar_fit(res, min(p_i, maxBICSearch), false);
+                    found_order = length(a) - 1;
+                else
+                    % Later iterations: direct fit at found order (skip BIC)
+                    a = nirs.math.ar_fit(res, found_order, true);
+                end
+            else
+                a = nirs.math.ar_fit(res, p_i, nosearch);
+            end
 
             f = [1; -a(2:end)];
 
@@ -191,19 +210,8 @@ function [stats, resid] = ar_irls_fast(d, X, Pmax, tune, nosearch, useGPU, singl
     end
     C = C * (nanmean(sigma2_all ./ diag(C)));
 
-    % Build 4D covariance tensor
-    covb = zeros(nCond, nCond, nChan, nChan);
-    for i = 1:nChan
-        Xi = Xfall{i};
-        for j = 1:nChan
-            Xj = Xfall{j};
-            lstV = ~isnan(sum(Xi, 2) + sum(Xj, 2));
-            pv = pinv(Xi(lstV, :)' * Xj(lstV, :)) * C(i, j);
-            covb(:, :, i, j) = covb(:, :, i, j) + pv;
-            covb(:, :, j, i) = covb(:, :, j, i) + pinv(Xj(lstV, :)' * Xi(lstV, :)) * C(j, i);
-        end
-    end
-    covb = covb / 2;
+    % Build 4D covariance tensor (batch Gram matrix, upper-triangle, backslash)
+    covb = nirs.math.build_covb_tensor(Xfall, C);
 
     % ============================================================
     % Assemble output struct (compatible with original ar_irls)
