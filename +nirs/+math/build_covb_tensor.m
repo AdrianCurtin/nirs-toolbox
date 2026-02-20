@@ -55,15 +55,25 @@ function covb = build_covb_tensor(Xfall, C)
         % One matrix multiply replaces nChan^2 individual Xi'*Xj products
         GG = Wmat' * Wmat;  % (nCond*nChan) x (nCond*nChan)
 
-        % Upper triangle only, backslash instead of pinv
+        % Upper triangle only, backslash with pinv fallback
         for i = 1:nChan
             idx_i = (i-1)*nCond + (1:nCond);
             for j = i:nChan
                 idx_j = (j-1)*nCond + (1:nCond);
                 Gij = GG(idx_i, idx_j);
                 Gji = GG(idx_j, idx_i);
-                covb(:, :, i, j) = Gij \ (Ik * C(i, j));
-                covb(:, :, j, i) = Gji \ (Ik * C(j, i));
+                rhs_ij = Ik * C(i, j);
+                rhs_ji = Ik * C(j, i);
+                w = warning('off', 'MATLAB:singularMatrix');
+                covb(:, :, i, j) = Gij \ rhs_ij;
+                covb(:, :, j, i) = Gji \ rhs_ji;
+                warning(w);
+                if any(~isfinite(covb(:, :, i, j)), 'all')
+                    covb(:, :, i, j) = pinv(Gij) * rhs_ij;
+                end
+                if any(~isfinite(covb(:, :, j, i)), 'all')
+                    covb(:, :, j, i) = pinv(Gji) * rhs_ji;
+                end
             end
         end
     else
@@ -75,8 +85,18 @@ function covb = build_covb_tensor(Xfall, C)
                 lstV = ~isnan(sum(Xi, 2) + sum(Xj, 2));
                 Gij = Xi(lstV, :)' * Xj(lstV, :);
                 Gji = Xj(lstV, :)' * Xi(lstV, :);
-                covb(:, :, i, j) = Gij \ (Ik * C(i, j));
-                covb(:, :, j, i) = Gji \ (Ik * C(j, i));
+                rhs_ij = Ik * C(i, j);
+                rhs_ji = Ik * C(j, i);
+                w = warning('off', 'MATLAB:singularMatrix');
+                covb(:, :, i, j) = Gij \ rhs_ij;
+                covb(:, :, j, i) = Gji \ rhs_ji;
+                warning(w);
+                if any(~isfinite(covb(:, :, i, j)), 'all')
+                    covb(:, :, i, j) = pinv(Gij) * rhs_ij;
+                end
+                if any(~isfinite(covb(:, :, j, i)), 'all')
+                    covb(:, :, j, i) = pinv(Gji) * rhs_ji;
+                end
             end
         end
     end
