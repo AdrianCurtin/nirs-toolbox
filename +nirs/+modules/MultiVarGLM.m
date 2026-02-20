@@ -154,7 +154,9 @@ classdef MultiVarGLM < nirs.modules.AbstractGLM
                 S(i).basis.stim=stim;
 
                 % print progress
-                obj.printProgress( i, numel(data) )
+                if(obj.verbose)
+                    obj.printProgress( i, numel(data) )
+                end
 
             end
         end

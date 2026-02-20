@@ -261,7 +261,9 @@ classdef Hyperscanning < nirs.modules.AbstractModule
                                         
                 end
                 
-                fprintf('Finished processing dyad %i of %i (%5.4g%%)\n',i,height(obj.link),100*i/height(obj.link));
+                if(obj.verbose)
+                    fprintf('Finished processing dyad %i of %i (%5.4g%%)\n',i,height(obj.link),100*i/height(obj.link));
+                end
                 
             end
             

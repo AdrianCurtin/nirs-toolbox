@@ -168,7 +168,9 @@ classdef OLS < nirs.modules.AbstractGLM
                 
                 
                 % print progress
-                obj.printProgress( i, numel(data) )
+                if(obj.verbose)
+                    obj.printProgress( i, numel(data) )
+                end
             end
 
         end

@@ -161,7 +161,9 @@ classdef repeatedMeas_GLM < nirs.modules.AbstractGLM
                     S(i).variables=var;
                 
                 % print progress
-                obj.printProgress( i, numel(data) )
+                if(obj.verbose)
+                    obj.printProgress( i, numel(data) )
+                end
             end
 
         end
