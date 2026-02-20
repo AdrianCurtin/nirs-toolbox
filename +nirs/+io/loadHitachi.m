@@ -300,8 +300,6 @@ function probe=getprobefrominfo(info)
 % figure out what probe this is
 
 modeParts=strsplit(info.Mode,'x');
-
-modeParts=strsplit(info.Mode,'x');
 m=int16(str2num(modeParts{1}));
 n=int16(str2num(modeParts{2}));
 
@@ -314,7 +312,8 @@ switch(info.Mode)
     case('4x4')
         
     case('3x11')
-         
+        m=int16(11);
+        n=int16(3);
     otherwise
         % I don't want to just assume I can do this based on the mode
         warning('This is a different possibly unsupported probe design');

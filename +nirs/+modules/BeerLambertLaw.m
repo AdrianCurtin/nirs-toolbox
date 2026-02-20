@@ -234,11 +234,11 @@ if(isa(data,'nirs.core.Data'))
     validWv = ~isnan(link.type)&link.type>0;
 
     lowWv = validWv & link.type<805;
-    highWv = validWv & link.type>805;
+    highWv = validWv & link.type>=805;
 
     newTypes = ["Other","Low","High"];
 
-    link.type=newTypes(lowWv*2+highWv*3)';
+    link.type=newTypes(1 + lowWv + highWv*2)';
 
     
     link=link(ismember(link.type,newTypes(2:end)),:);

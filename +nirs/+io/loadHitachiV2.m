@@ -254,7 +254,8 @@ switch(info.Mode)
     case('4x4')
         
     case('3x11')
-         
+        m=int16(11);
+        n=int16(3);
     otherwise
         % I don't want to just assume I can do this based on the mode
         warning('This is a different possibly unsupported probe design');
