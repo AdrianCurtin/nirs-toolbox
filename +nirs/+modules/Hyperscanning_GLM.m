@@ -339,9 +339,9 @@ for a=1:size(dataA,2)
         link.detector{cnt,1}=['src-' num2str(probeB.link.source(b)) ':' ...
             'det-' num2str(probeB.link.detector(b))];
         if(iscell(probeA.link.type))
-            if(probeA.link.type{a}==probeB.link.type{b})
+            if(strcmp(probeA.link.type{a},probeB.link.type{b}))
                 link.type{cnt,1}=probeA.link.type{a};
-               
+
             else
                 lst=[lst; cnt];
                 link.type{cnt,1}=' ';
