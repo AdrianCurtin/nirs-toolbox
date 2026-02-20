@@ -161,9 +161,7 @@ classdef repeatedMeas_GLM < nirs.modules.AbstractGLM
                     S(i).variables=var;
                 
                 % print progress
-                if(obj.verbose)
-                 fprintf('Completed file %d of %d\n', i, numel(data))
-                end
+                obj.printProgress( i, numel(data) )
             end
 
         end

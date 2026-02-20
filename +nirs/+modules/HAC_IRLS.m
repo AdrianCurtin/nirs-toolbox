@@ -195,7 +195,7 @@ classdef HAC_IRLS < nirs.modules.AbstractGLM
                 S(i).basis.stim=stim;
                 
                 % print progress
-                fprintf('Completed file %d of %d\n', i, numel(data))
+                obj.printProgress( i, numel(data) )
             end
             
         end

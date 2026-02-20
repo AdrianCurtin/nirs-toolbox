@@ -168,7 +168,7 @@ classdef OLS < nirs.modules.AbstractGLM
                 
                 
                 % print progress
-                fprintf('Completed file %d of %d\n', i, numel(data))
+                obj.printProgress( i, numel(data) )
             end
 
         end

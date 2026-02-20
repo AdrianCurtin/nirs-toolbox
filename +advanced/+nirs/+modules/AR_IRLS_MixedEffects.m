@@ -149,9 +149,7 @@ classdef AR_IRLS_MixedEffects < nirs.modules.AbstractGLM
                 S(i).basis.stim=stim;
                 
                 % print progress
-                if(obj.verbose)
-                 fprintf('Completed file %d of %d\n', i, numel(data))
-                end
+                obj.printProgress( i, numel(data) )
             end
 
         end
