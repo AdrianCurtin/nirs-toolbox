@@ -8,7 +8,7 @@ classdef Hyperscanning < nirs.modules.AbstractModule
         min_event_duration;  % minimum duration of events
         link;
         linkVariable = 'hyperscan'; % hyperscan variable from nirx
-        symetric;
+        symmetric;
         verbose;
         ignore;  % seconds at start/end of each scan or block to ignore
         estimate_null; % flag to also estimate connectivity between all non-paired subjects 
@@ -21,7 +21,7 @@ classdef Hyperscanning < nirs.modules.AbstractModule
             obj.corrfcn = @(data)nirs.sFC.ar_corr(data,'18xFs',true,10);  %default to use AR-whitened robust correlation (BIC capped at 10)
             obj.divide_events=false;
             obj.min_event_duration=30;
-            obj.symetric=true;
+            obj.symmetric=true;
             obj.ignore=10;
             obj.verbose=false;
             obj.estimate_null=false;
@@ -202,7 +202,7 @@ classdef Hyperscanning < nirs.modules.AbstractModule
                                 [r(:,:,j),p,dfe(j)]=obj.corrfcn(tmp);
                             end
                             
-                            if(obj.symetric)
+                            if(obj.symmetric)
                                 r = atanh(r); % r-to-Z
                                 for j = 1:size(r,3)
                                     aa=r(1:end/2,1:end/2,j);            % within subject A
@@ -239,7 +239,7 @@ classdef Hyperscanning < nirs.modules.AbstractModule
                     tmp.time(lst)=[];
                     [r,p,dfe]=obj.corrfcn(tmp);
                     
-                    if(obj.symetric)
+                    if(obj.symmetric)
                         r = atanh(r); % r-to-Z
                         if ~isempty(strfind(func2str(obj.corrfcn),'nirs.sFC.grangers'))
                             r = exp(2*r); % Z-to-F
