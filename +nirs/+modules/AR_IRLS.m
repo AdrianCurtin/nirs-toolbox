@@ -268,7 +268,8 @@ classdef AR_IRLS < nirs.modules.AbstractGLM
                 S(i).basis.Fs=Fs;
                 S(i).basis.stim=stim;
                 
-                % print progress
+                % print progress (note: because this is inside a parfor loop,
+                % messages may appear in the command window out of order)
                 if(obj.verbose)
                     obj.printProgress( i, numel(data) )
                 end
