@@ -1,23 +1,20 @@
-function [beta,bHat,covb,LL,w] = fitlme(X,Y,Z,robust_flag,zero_theta,verbose,nblocks)
+function [beta,bHat,covb,LL,w,theta_out,sigma2_out] = fitlme(X,Y,Z,robust_flag,zero_theta,verbose,fixed_theta)
 % Robust linear mixed-effects model fiting
-% [beta,bHat,covb,LL,w] = nirs.math.fitlme( X, Y, Z, robust_flag, zero_theta_flag, verbose_flag, nblocks )
+% [beta,bHat,covb,LL,w,theta,sigma2] = nirs.math.fitlme( X, Y, Z, robust_flag, zero_theta_flag, verbose_flag, fixed_theta )
 %
-% nblocks: when >1, assumes X/Z are block-diagonal with nblocks identical
-%          blocks (from kron(speye(nblocks), X_small)) and solves each
-%          block independently via parfor. Set to 0 or omit for original
-%          monolithic solve.
+% fixed_theta: when provided and finite, skip theta optimization and use
+%              this value. Useful for Kronecker decomposition where theta
+%              is estimated jointly across channels.
+%
+% sigma2: error variance estimate (ML or robust). Useful for sigma²
+%         pooling in Kronecker decomposition.
 %
 % TODO: Add support for covariance patterns other than isotropic
 if nargin<4, robust_flag = false; end
 if nargin<5, zero_theta = false; end
 if nargin<6, verbose = false; end
-if nargin<7, nblocks = 0; end
-
-%% Block-diagonal decomposition path
-if nblocks > 1
-    [beta,bHat,covb,LL,w] = fitlme_blockdecomp(X,Y,Z,robust_flag,zero_theta,verbose,nblocks);
-    return;
-end
+if nargin<7, fixed_theta = NaN; end
+sigma2_out = NaN;
 
 nT = size(Y,1);
 nY = size(Y,2);
@@ -78,10 +75,11 @@ if nY > 1
 end
 
 %% Compute theta
-if zero_theta
+if isfinite(fixed_theta)
+    theta = fixed_theta;
+elseif zero_theta
     theta = 0;
 else
-   
     theta = solveForTheta(X,Y,Z);
 end
 
@@ -129,8 +127,8 @@ if robust_flag
             return;
         end
         
-        % Re-estimate using new weights
-        if ~zero_theta
+        % Re-estimate using new weights (skip if theta is fixed externally)
+        if ~zero_theta && ~isfinite(fixed_theta)
             theta = solveForTheta(w*X,w*Y,w*Z,theta); % Get optimal theta
         end
         [~,beta,bHat] = solveLME(w*X,w*Y,w*Z,theta); % Solve model
@@ -174,6 +172,7 @@ if robust_flag
 
     
     covb = sigma^2*(invR1'*invR1);
+    sigma2 = sigma^2;
     w0 = diag(w);
     w = zeros(nT0,1);
     w(~bad_times) = w0;
@@ -181,84 +180,12 @@ else
     w = ones(nT0,1);
 end
 
+if nargout >= 6
+    theta_out = theta;
 end
-
-%% Block-diagonal decomposition: solve each channel independently
-function [beta,bHat,covb,LL,w] = fitlme_blockdecomp(X,Y,Z,robust_flag,zero_theta,verbose,nblocks)
-% Exploits kron(speye(nblocks), X_small) structure to decompose into
-% nblocks independent sub-problems solved via parfor.
-
-nT_total = size(Y,1);
-nX_total = size(X,2);
-nZ_total = size(Z,2);
-
-% Compute per-block dimensions
-blk_rows = nT_total / nblocks;
-blk_Xcols = nX_total / nblocks;
-blk_Zcols = nZ_total / nblocks;
-
-assert(mod(blk_rows,1)==0 && mod(blk_Xcols,1)==0, ...
-    'fitlme:blockdecomp', 'Matrix dimensions not evenly divisible by nblocks');
-
-% Extract the small design matrices from the first block
-X_small = X(1:blk_rows, 1:blk_Xcols);
-if blk_Zcols > 0
-    Z_small = Z(1:blk_rows, 1:blk_Zcols);
-else
-    Z_small = zeros(blk_rows, 0);
+if nargout >= 7
+    sigma2_out = sigma2;
 end
-
-% Extract per-block Y vectors (Y is the stacked beta, one column)
-Y_blocks = reshape(Y, blk_rows, nblocks);
-
-% Pre-allocate output arrays for parfor
-beta_blocks = zeros(blk_Xcols, nblocks);
-bHat_blocks = zeros(blk_Zcols, nblocks);
-covb_blocks = zeros(blk_Xcols, blk_Xcols, nblocks);
-LL_blocks   = zeros(1, nblocks);
-w_blocks    = zeros(blk_rows, nblocks);
-
-if verbose
-    disp(sprintf('fitlme block decomposition: %d blocks of %d x %d', nblocks, blk_rows, blk_Xcols));
-    tic;
-end
-
-% Check for NaN rows in X_small (shared across blocks since X = kron(I, X_small))
-% But W*X differs per block, so we pass per-block weighted data
-% X_small is the same for all blocks, but Y differs per block
-
-parfor ch = 1:nblocks
-    Y_ch = Y_blocks(:, ch);
-
-    % Call the original single-block fitlme (nblocks=0 to use monolithic path)
-    [b_ch, bH_ch, cv_ch, ll_ch, w_ch] = nirs.math.fitlme( ...
-        X_small, Y_ch, Z_small, robust_flag, zero_theta, false, 0);
-
-    beta_blocks(:, ch) = b_ch;
-    bHat_blocks(:, ch) = bH_ch;
-    covb_blocks(:,:,ch) = cv_ch;
-    LL_blocks(ch) = ll_ch;
-    w_blocks(:, ch) = w_ch;
-end
-
-if verbose
-    disp(sprintf('fitlme block decomposition complete: %.1fs', toc));
-end
-
-% Reassemble into stacked vectors matching the kron structure
-beta = beta_blocks(:);          % [blk_Xcols*nblocks x 1]
-bHat = bHat_blocks(:);          % [blk_Zcols*nblocks x 1]
-LL   = sum(LL_blocks);          % scalar joint log-likelihood
-w    = w_blocks(:);             % [blk_rows*nblocks x 1]
-
-% Assemble block-diagonal covariance (each block is independent)
-covb = zeros(nX_total, nX_total);
-for ch = 1:nblocks
-    r1 = (ch-1)*blk_Xcols + 1;
-    r2 = ch*blk_Xcols;
-    covb(r1:r2, r1:r2) = covb_blocks(:,:,ch);
-end
-covb = sparse(covb);
 
 end
 
