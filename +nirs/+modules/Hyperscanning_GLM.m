@@ -286,15 +286,13 @@ end
 
 function data2= make_ts(dataA,dataB,probeA,probeB,Fs,method)
 
-cnt=1;
-link=struct;
+nA = size(dataA, 2);
+nB = size(dataB, 2);
+
 if(strcmp(method,'Pearson'))
-    for a=1:size(dataA,2)
-        for b=1:size(dataB,2)
-            dd(:,cnt)=dataA(:,a).*dataB(:,b);
-            cnt=cnt+1;
-        end
-    end
+    % Vectorized cross-brain product: column (a-1)*nB+b = A(:,a).*B(:,b)
+    dd = kron(dataA, ones(1, nB)) .* repmat(dataB, 1, nA);
+
 elseif(contains(method,'Wavelet'))
     str=strrep(method,'Wavelet','');
     str=strrep(str,'(','');
@@ -303,61 +301,72 @@ elseif(contains(method,'Wavelet'))
     str=strrep(str,'Phase','');
     freqband = str2num(str);
     freqband=freqband/Fs;
-    for i=1:size(dataA,2);
-        [wtA(:,:,i),f]=cwt(dataA(:,i));
-    end;
-    for i=1:size(dataB,2);
-        [wtB(:,:,i),f]=cwt(dataB(:,i));
-    end;
 
-    cnt=1;
-    for i=1:size(dataA,2);
-        for j=1:size(dataB,2);
-            WCOH(:,:,cnt)=wtA(:,:,i).*conj(wtB(:,:,j));
-            cnt=cnt+1;
-        end
+    % Batch CWT
+    [wtA_1, f] = cwt(dataA(:,1));
+    nF = size(wtA_1, 1);
+    nT = size(wtA_1, 2);
+    wtA = zeros(nF, nT, nA);
+    wtA(:,:,1) = wtA_1;
+    for i = 2:nA
+        wtA(:,:,i) = cwt(dataA(:,i));
     end
-    
+    wtB = zeros(nF, nT, nB);
+    for i = 1:nB
+        wtB(:,:,i) = cwt(dataB(:,i));
+    end
 
-    dd = zeros(size(WCOH,2),size(WCOH,3));
-   
-    lst=find(f>=freqband(1) & f<=freqband(2));
+    % Vectorized cross-coherence: reshape to (nF*nT) x nA/nB, then product
+    lst = find(f >= freqband(1) & f <= freqband(2));
+    wtA_band = reshape(wtA(lst,:,:), [], nA);   % (nLst*nT) x nA
+    wtB_band = reshape(wtB(lst,:,:), [], nB);   % (nLst*nT) x nB
+    nLst = numel(lst);
+
+    % Cross product: kron pattern same as Pearson but on wavelet coefficients
+    WCOH_flat = kron(wtA_band, ones(1, nB)) .* conj(repmat(wtB_band, 1, nA));
+    % Reshape to (nLst x nT x nPairs) for median
+    WCOH_flat = reshape(WCOH_flat, nLst, nT, []);
+
     if(contains(method,'Mag'))
-        dd = squeeze(median(abs(WCOH(lst,:,:)),1));
+        dd = squeeze(median(abs(WCOH_flat), 1));
     else
-        dd= squeeze(median(angle(WCOH(lst,:,:)),1));
+        dd = squeeze(median(angle(WCOH_flat), 1));
     end
-    
 end
 
-cnt=1;
-lst=[];
-for a=1:size(dataA,2)
-    for b=1:size(dataB,2)
-        link.source{cnt,1}=['src-' num2str(probeA.link.source(a)) ':' ...
-            'det-' num2str(probeA.link.detector(a))];
-        link.detector{cnt,1}=['src-' num2str(probeB.link.source(b)) ':' ...
-            'det-' num2str(probeB.link.detector(b))];
-        if(iscell(probeA.link.type))
-            if(strcmp(probeA.link.type{a},probeB.link.type{b}))
-                link.type{cnt,1}=probeA.link.type{a};
+% Build link table (vectorized)
+srcA = probeA.link.source;
+detA = probeA.link.detector;
+srcB = probeB.link.source;
+detB = probeB.link.detector;
 
-            else
-                lst=[lst; cnt];
-                link.type{cnt,1}=' ';
-            end
-        else
-            if(probeA.link.type(a)==probeB.link.type(b))
-                link.type(cnt,1)=probeA.link.type(a);
-            else
-                lst=[lst; cnt];
-                link.type(cnt,1)=NaN;
-            end
+% Expand: each A channel paired with every B channel
+idxA = kron((1:nA)', ones(nB, 1));   % [1;1;..1; 2;2;..2; ... nA;nA;..nA]
+idxB = repmat((1:nB)', nA, 1);       % [1;2;..nB; 1;2;..nB; ... ]
 
-        end
-        cnt=cnt+1;
-    end;
-end;
+link.source  = strcat('src-', string(srcA(idxA)), ':det-', string(detA(idxA)));
+link.detector = strcat('src-', string(srcB(idxB)), ':det-', string(detB(idxB)));
+link.source  = cellstr(link.source);
+link.detector = cellstr(link.detector);
+
+typeA = probeA.link.type;
+typeB = probeB.link.type;
+if iscell(typeA)
+    tA = typeA(idxA);
+    tB = typeB(idxB);
+    match = strcmp(tA, tB);
+    link.type = tA;
+    link.type(~match) = {' '};
+    lst = find(~match);
+else
+    tA = typeA(idxA);
+    tB = typeB(idxB);
+    match = (tA == tB);
+    link.type = tA;
+    link.type(~match) = NaN;
+    lst = find(~match);
+end
+
 data2=nirs.core.Data;
 data2.probe=probeA;
 data2.data=dd;
