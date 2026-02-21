@@ -57,59 +57,56 @@
             
             % preallocate group stats
             G = nirs.core.ChannelStats();
-            
-            if(obj.weighted)
-                %% loop through files
-                W = sparse([]);
-                iW = sparse([]);
-            end
-            
-            b = [];
-            LstV=[];
-            vars = table();
-            for i = 1:length(S)
 
-                lstValid=~isnan(S(i).tstat);
-                LstV=[LstV; lstValid];
-                % coefs
-                if ~isempty(strfind(obj.formula(1:strfind(obj.formula,'~')-1),'tstat'))
-                    b = [b; S(i).tstat];
+            nFiles = length(S);
+            useTstat = ~isempty(strfind(obj.formula(1:strfind(obj.formula,'~')-1),'tstat'));
+
+            % Pre-allocate cell arrays for parallel assembly
+            b_cells    = cell(nFiles, 1);
+            LstV_cells = cell(nFiles, 1);
+            vars_cells = cell(nFiles, 1);
+            if obj.weighted
+                W_cells  = cell(nFiles, 1);
+                iW_cells = cell(nFiles, 1);
+            end
+
+            parfor i = 1:nFiles
+                lstValid = ~isnan(S(i).tstat);
+                LstV_cells{i} = lstValid;
+
+                if useTstat
+                    b_cells{i} = S(i).tstat;
                 else
-                    b = [b; S(i).beta];
+                    b_cells{i} = S(i).beta;
                 end
 
                 % whitening transform
-
-                if(obj.weighted)
-                    if(obj.verbose)
-                        nirs.util.flushstdout(1);
-                        fprintf( 'preparing covariance model %4i of %4i.\n', i, length(S) )
-                    end
+                if obj.weighted
                     [u, s, ~] = svd(S(i).covb(lstValid,lstValid), 'econ');
-                    %W = blkdiag(W, diag(1./diag(sqrt(s))) * u');
-                    w=nan(size(S(i).covb));
-                    w(lstValid,lstValid)=pinv(s).^.5 * u';
-                    W = blkdiag(W, w);
-                    iw=nan(size(S(i).covb));
-                    iw(lstValid,lstValid)=u*sqrt(s);
-                    iW = blkdiag(iW, iw );
+                    w = nan(size(S(i).covb));
+                    w(lstValid,lstValid) = pinv(s).^.5 * u';
+                    W_cells{i} = sparse(w);
+                    iw = nan(size(S(i).covb));
+                    iw(lstValid,lstValid) = u*sqrt(s);
+                    iW_cells{i} = sparse(iw);
                 end
-
-
-                %                L = chol(S(i).covb,'upper');
-                %                W = blkdiag(W,pinv(L));
 
                 % table of variables
                 file_idx = repmat(i, [height(S(i).variables) 1]);
-
-                if(~isempty(demo))
-                    vars = [vars;
-                        [table(file_idx) S(i).variables repmat(demo(i,:), [height(S(i).variables) 1])]
-                        ];
+                if ~isempty(demo)
+                    vars_cells{i} = [table(file_idx) S(i).variables repmat(demo(i,:), [height(S(i).variables) 1])];
                 else
-                    vars = [vars; ...
-                        [table(file_idx) S(i).variables]];
+                    vars_cells{i} = [table(file_idx) S(i).variables];
                 end
+            end
+
+            % Assemble from cell arrays
+            b    = vertcat(b_cells{:});
+            LstV = vertcat(LstV_cells{:});
+            vars = vertcat(vars_cells{:});
+            if obj.weighted
+                W  = blkdiag(W_cells{:});
+                iW = blkdiag(iW_cells{:});
             end
 
             % sort

@@ -65,11 +65,6 @@ if nY > 1
     return;
 end
 
-%% Ensure no sparse matrices
-X = full(X);
-Y = full(Y);
-Z = full(Z);
-
 %% Compute theta
 if zero_theta
     theta = 0;
