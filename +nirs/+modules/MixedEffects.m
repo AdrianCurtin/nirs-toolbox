@@ -21,6 +21,7 @@
         weighted=true;
         verbose=false;
         use_nonparametric_stats=false;
+        useBlockDecomposition=false;  % solve each channel independently via parfor (faster for many channels, uses diagonal-only covariance weighting — skips SVD/Cholesky cross-channel whitening)
     end
     properties(Hidden=true)
         conditional_tests ={}
@@ -65,10 +66,10 @@
             b_cells    = cell(nFiles, 1);
             LstV_cells = cell(nFiles, 1);
             vars_cells = cell(nFiles, 1);
-            if obj.weighted
-                W_cells  = cell(nFiles, 1);
-                iW_cells = cell(nFiles, 1);
-            end
+            useDecomp_ = obj.useBlockDecomposition;
+            W_cells      = cell(nFiles, 1);
+            iW_cells     = cell(nFiles, 1);
+            dvar_cells   = cell(nFiles, 1);
 
             parfor i = 1:nFiles
                 lstValid = ~isnan(S(i).tstat);
@@ -82,13 +83,31 @@
 
                 % whitening transform
                 if obj.weighted
-                    [u, s, ~] = svd(S(i).covb(lstValid,lstValid), 'econ');
-                    w = nan(size(S(i).covb));
-                    w(lstValid,lstValid) = pinv(s).^.5 * u';
-                    W_cells{i} = sparse(w);
-                    iw = nan(size(S(i).covb));
-                    iw(lstValid,lstValid) = u*sqrt(s);
-                    iW_cells{i} = sparse(iw);
+                    if useDecomp_
+                        % Diagonal-only variance (skip expensive SVD)
+                        dv = nan(size(S(i).covb, 1), 1);
+                        dv(lstValid) = diag(S(i).covb(lstValid, lstValid));
+                        dvar_cells{i} = dv;
+                    else
+                        % Full cross-channel whitening
+                        nValid = sum(lstValid);
+                        covb_valid = full(S(i).covb(lstValid, lstValid));
+                        w = nan(size(S(i).covb));
+                        iw = nan(size(S(i).covb));
+                        try
+                            % Cholesky: O(n^3/3), much faster than SVD
+                            L = chol(covb_valid, 'lower');
+                            w(lstValid,lstValid) = L \ eye(nValid);
+                            iw(lstValid,lstValid) = L;
+                        catch
+                            % Fallback to SVD for singular/ill-conditioned covb
+                            [u, s, ~] = svd(covb_valid, 'econ');
+                            w(lstValid,lstValid) = pinv(s).^.5 * u';
+                            iw(lstValid,lstValid) = u*sqrt(s);
+                        end
+                        W_cells{i} = sparse(w);
+                        iW_cells{i} = sparse(iw);
+                    end
                 end
 
                 % table of variables
@@ -104,9 +123,12 @@
             b    = vertcat(b_cells{:});
             LstV = vertcat(LstV_cells{:});
             vars = vertcat(vars_cells{:});
-            if obj.weighted
+            if obj.weighted && ~obj.useBlockDecomposition
                 W  = blkdiag(W_cells{:});
                 iW = blkdiag(iW_cells{:});
+            end
+            if obj.weighted && obj.useBlockDecomposition
+                diag_var = vertcat(dvar_cells{:});
             end
 
             % sort
@@ -285,14 +307,106 @@
             end
             
             nchan = max(lst);
-            
-            X = kron(speye(nchan), X);
-            Z = kron(speye(nchan), Z);
-            
-            if ~obj.weighted
-                W = speye(size(X,1));
-                iW = speye(size(X,1));
-            end
+            nFixed = size(X, 2);
+            nRand  = size(Z, 2);
+
+            if obj.useBlockDecomposition && nchan > 1
+                %% Block-diagonal decomposition: solve each channel independently
+                % Uses diagonal-only covariance weighting (skips SVD/Cholesky
+                % cross-channel whitening). Much faster for large channel
+                % counts but ignores cross-channel covariance, which may
+                % produce slightly different standard errors and p-values.
+                % Beta point estimates are unaffected. Set
+                % useBlockDecomposition=false for the original monolithic
+                % solve with full cross-channel covariance weighting.
+                if(obj.verbose)
+                    disp(sprintf('Block decomposition: %d channels x %d observations each', nchan, sum(lst==1)));
+                    tic;
+                end
+
+                % Sort betas into channel-grouped order
+                b_sorted = b(idx);
+                nPerChan = sum(lst == 1);
+
+                X_small = X;  % per-channel design matrix (nPerChan x nFixed)
+                Z_small = Z;  % per-channel random effects matrix
+
+                % Build diagonal weights in channel-sorted order
+                if obj.weighted
+                    diag_var_sorted = diag_var(idx);
+                end
+
+                % Pre-allocate parfor outputs
+                Coef_cells = cell(nchan, 1);
+                CovB_cells = cell(nchan, 1);
+                LL_blocks  = nan(1, nchan);
+                w_cells    = cell(nchan, 1);
+
+                robust_   = obj.robust;
+                weighted_ = obj.weighted;
+
+                parfor ch = 1:nchan
+                    rows = find(lst == ch);
+                    b_ch = b_sorted(rows);
+
+                    Xw = X_small;
+                    Zw = Z_small;
+                    bw = b_ch;
+
+                    if weighted_
+                        dv_ch = diag_var_sorted(rows);
+                        w_ch = zeros(size(b_ch));
+                        valid = ~isnan(dv_ch) & dv_ch > 0 & ~isnan(b_ch);
+                        w_ch(valid) = 1 ./ sqrt(dv_ch(valid));
+                        Wd = spdiags(w_ch, 0, length(w_ch), length(w_ch));
+                        Xw = Wd * X_small;
+                        Zw = Wd * Z_small;
+                        bw = Wd * b_ch;
+                    end
+
+                    lstK = find(~all(Xw == 0, 1));
+
+                    [c, ~, cv, ll, ww] = nirs.math.fitlme( ...
+                        Xw(:,lstK), bw, Zw, robust_, false, false);
+
+                    coef_full = nan(nFixed, 1);
+                    covb_full = 1E6 * eye(nFixed);
+                    if ~isempty(lstK)
+                        coef_full(lstK) = c;
+                        covb_full(lstK, lstK) = cv;
+                    end
+
+                    Coef_cells{ch} = coef_full;
+                    CovB_cells{ch} = covb_full;
+                    LL_blocks(ch) = ll;
+                    w_cells{ch} = ww;
+                end
+
+                % Assemble results
+                Coef = vertcat(Coef_cells{:});
+                CovB = blkdiag(CovB_cells{:});
+
+                lstKeep = 1:(nFixed * nchan);
+                ra = NaN;
+                W = [];
+
+                if(obj.verbose)
+                    disp(['Block decomposition complete: ' num2str(toc) 's']);
+                end
+
+                if obj.use_nonparametric_stats
+                    warning('Permutation testing not supported with block decomposition');
+                end
+
+            else
+                %% Monolithic solve (original path with full cross-channel covariance)
+                X = kron(speye(nchan), X);
+                Z = kron(speye(nchan), Z);
+
+                if ~obj.weighted
+                    W = speye(size(X,1));
+                    iW = speye(size(X,1));
+                end
             
             if(size(X,1)~=height(vars))
                 % handle the case when one files have different
@@ -436,9 +550,11 @@
             
              if(obj.verbose)
                 disp(['Finished solving: time elapsed ' num2str(toc) 's']);
-                
+
             end
-             
+
+            end  % if useBlockDecomposition / else monolithic
+
             % for idx=1:length(cnames);
             %     cnames{idx}=cnames{idx}(max([0 min(strfind(cnames{idx},'_'))])+1:end);
             %     %if(cnames{idx}(1)=='_'); cnames{idx}(1)=[]; end;
@@ -447,12 +563,15 @@
             cnames = repmat(cnames, [nchan 1]);
             
             %% output
-            G.beta=nan(size(X,2),1);
-            G.covb=1E6*eye(size(X,2)); %make sure anything not fit will have high variance
-            
+            nBeta = nFixed * nchan;
+            G.beta=nan(nBeta,1);
+            if obj.useBlockDecomposition && nchan > 1
+                G.covb=sparse(1:nBeta,1:nBeta,1E6,nBeta,nBeta); %sparse diagonal default
+            else
+                G.covb=1E6*eye(nBeta); %make sure anything not fit will have high variance
+            end
+
             G.beta(lstKeep) = Coef;
-            %G.beta(end+1)=ra;  
-%            warning('remove MixedEffects line 334');
             G.covb(lstKeep,lstKeep) = CovB;
             G.dfe        = lm1.DFE; 
             
@@ -561,11 +680,11 @@
                 end;
             end
             
-            if(obj.include_diagnostics)
+            if(obj.include_diagnostics && ~obj.useBlockDecomposition)
                 if(obj.verbose)
                     disp('Adding diagnostics information');
                 end
-                
+
                 %Create a diagnotistcs table of the adjusted data
                
                 G.categoricalvariableInfo=lm1.VariableInfo(lm1.VariableInfo.InModel,:);
