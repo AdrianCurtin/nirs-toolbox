@@ -108,7 +108,7 @@ if robust_flag
     end
     
     adj = 1 ./ sqrt(1-min(.9999,lev));
-    xrank = rank(X);
+    xrank = nirs.math.sparseRank(X);
     num_params = max(1,xrank);
     
     while iter<10
@@ -355,7 +355,7 @@ if(nargout>1)
     else
         sigma2 = r2/nT;
     end
-    xr = rank(X);
+    xr = nirs.math.sparseRank(X);
     if(xr<size(R1,1))
          invR1 = pinv(R1);
     else
@@ -381,7 +381,11 @@ end
 function [R,p] = cholSafe(d,varargin)
 
 delta = eps(class(d));
-I = eye(size(d));
+if issparse(d)
+    I = speye(size(d));
+else
+    I = eye(size(d));
+end
 
 p=1; iter=1; max_iter=1000;
 while p~=0
@@ -452,6 +456,6 @@ Lambda = sqrt(exp(theta)) * speye(nZ); % Isotropic covariance pattern
  %            % Lambda has size q by q where q = size(Z,2).
  %            Lambda = getLowerTriangularCholeskyFactor(Psi);
 
-            
+
 end
 

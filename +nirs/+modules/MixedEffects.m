@@ -499,7 +499,7 @@
             
             [i,j]=find(isnan(X));
             lst=find(~ismember(1:size(X,1),unique(i)));
-            if(rank(full(X(lst,:)))<size(X,2))
+            if(nirs.math.sparseRank(X(lst,:))<size(X,2))
                 warning('Model is unstable');
             end
             lstKeep=find(~all(X==0));
