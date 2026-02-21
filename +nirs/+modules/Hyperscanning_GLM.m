@@ -368,10 +368,15 @@ else
 end
 
 data2=nirs.core.Data;
-data2.probe=probeA;
 data2.data=dd;
-data2.probe.link=struct2table(link);
-data2.probe.link(lst,:)=[];
-data2.data(:,lst)=[];
+
+% Use a plain Probe for cross-brain pairs — the cross-brain link table
+% has string source/detector labels that don't match the original probe's
+% optode layout (and would break MixedEffects if the original is ProbeROI).
+p = nirs.core.Probe();
+p.link = struct2table(link);
+p.link(lst,:) = [];
+data2.data(:,lst) = [];
+data2.probe = p;
 
 end
